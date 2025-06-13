@@ -1,0 +1,63 @@
+import os
+import sys
+import struct
+import hashlib
+import base58
+from Crypto.Cipher import AES
+from ecdsa import SECP256k1, SigningKey
+
+WALLET_PATH = "wallet.dat"
+PASSWORD = "n%UN|#y<!"
+
+def hash256(data):
+    return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+
+def encode_wif(privkey_bytes, compressed=True):
+    prefix = b'\x80' + privkey_bytes
+    if compressed:
+        prefix += b'\x01'
+    checksum = hash256(prefix)[:4]
+    return base58.b58encode(prefix + checksum).decode()
+
+def parse_wallet_dat(wallet_path):
+    with open(wallet_path, "rb") as f:
+        raw = f.read()
+
+    # Примитивный поиск по сигнатурам (только для демонстрации)
+    keys = []
+    for i in range(len(raw)):
+        if raw[i:i+4] == b'\x04\x88\xAD\xE4':  # HD wallet prefix xprv
+            key = raw[i:i+78]
+            keys.append(key)
+        elif raw[i:i+1] == b'\x80' and len(raw[i:i+34]) == 34:
+            candidate = raw[i:i+34]
+            if candidate[-4:] == hash256(candidate[:-4])[:4]:
+                keys.append(candidate)
+
+    print(f"[+] Найдено потенциальных ключей: {len(keys)}")
+    return keys
+
+def main():
+    if not os.path.exists(WALLET_PATH):
+        print("wallet.dat не найден!")
+        sys.exit(1)
+
+    keys = parse_wallet_dat(WALLET_PATH)
+
+    with open("extracted_wifs.txt", "w") as out:
+        for i, raw in enumerate(keys):
+            try:
+                if len(raw) == 34 and raw[0] == 0x80:
+                    wif = base58.b58encode(raw).decode()
+                else:
+                    sk = SigningKey.from_string(raw[1:33], curve=SECP256k1)
+                    wif = encode_wif(sk.to_string())
+                out.write(f"{wif}\n")
+                print(f"[{i}] WIF: {wif}")
+            except Exception as e:
+                print(f"Ошибка при обработке ключа [{i}]: {e}")
+
+    print("✅ Ключи сохранены в extracted_wifs.txt")
+
+if __name__ == "__main__":
+    main()
